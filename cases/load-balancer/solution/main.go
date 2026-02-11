@@ -50,9 +50,9 @@ func (c *ConsistentHash) Get(key string) string {
 		return ""
 	}
 
-	hash := int(crc32.ChecksumIEEE([]byte(key)))
+	hash := crc32.ChecksumIEEE([]byte(key))
 	idx := sort.Search(len(c.keys), func(i int) bool {
-		return c.keys[i] >= uint32(hash)
+		return c.keys[i] >= hash
 	})
 	if idx == len(c.keys) {
 		idx = 0
