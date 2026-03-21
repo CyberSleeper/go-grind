@@ -4,7 +4,6 @@ import "container/list"
 
 type LRUCache struct {
 	Capacity int
-	Size     int
 	HashMap  map[int]*list.Element
 	Dll      *list.List
 }
@@ -24,45 +23,42 @@ func NewNode(key, value int) *Node {
 func Constructor(capacity int) LRUCache {
 	return LRUCache{
 		Capacity: capacity,
-		Size:     0,
 		HashMap:  make(map[int]*list.Element),
 		Dll:      list.New(),
 	}
 }
 
-func (this *LRUCache) Get(key int) int {
-	v, exists := this.HashMap[key]
+func (c *LRUCache) Get(key int) int {
+	v, exists := c.HashMap[key]
 	if !exists {
 		return -1
 	}
-	this.Dll.MoveToFront(v)
+	c.Dll.MoveToFront(v)
 	// fmt.Println("GET", this.HashMap[key].Value, v.Value)
 	el := v.Value.(*Node)
 	return int(el.Value)
 }
 
-func (this *LRUCache) evict() {
-	v := this.Dll.Back()
+func (c *LRUCache) evict() {
+	v := c.Dll.Back()
 	if v == nil {
 		return
 	}
-	delete(this.HashMap, v.Value.(*Node).Key)
-	this.Dll.Remove(v)
-	this.Size--
+	delete(c.HashMap, v.Value.(*Node).Key)
+	c.Dll.Remove(v)
 }
 
-func (this *LRUCache) Put(key int, value int) {
-	v, exists := this.HashMap[key]
+func (c *LRUCache) Put(key int, value int) {
+	v, exists := c.HashMap[key]
 	if !exists {
-		if this.Capacity == this.Size {
-			this.evict()
+		if c.Capacity == len(c.HashMap) {
+			c.evict()
 		}
-		this.Size++
 		newNode := NewNode(key, value)
-		this.HashMap[key] = this.Dll.PushFront(newNode)
+		c.HashMap[key] = c.Dll.PushFront(newNode)
 		// fmt.Println("CREATE", this.HashMap[key].Value, newNode.Value)
 	} else {
-		this.Dll.MoveToFront(v)
+		c.Dll.MoveToFront(v)
 		v.Value.(*Node).Value = value
 		// fmt.Println("SET", this.HashMap[key].Value, el.Value)
 	}
