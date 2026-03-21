@@ -21,76 +21,78 @@ type LFUCache struct {
 	Capacity int
 }
 
-func (this *LFUCache) debug(info string) {
+func (c *LFUCache) debug(info string) {
 	if !debug {
 		return
 	}
 
 	fmt.Printf("%s = ", info)
-	cur := this.Dll.Front()
+	cur := c.Dll.Front()
 	for cur != nil {
 		fmt.Printf("{%d:%d:%d} ", cur.Value.(*Node).Key, cur.Value.(*Node).Value, cur.Value.(*Node).Counter)
 		cur = cur.Next()
 	}
 	fmt.Println()
 	fmt.Printf("Latest:\n")
-	for k, v := range this.Latest {
+	for k, v := range c.Latest {
 		fmt.Printf("%d:%d\n", k, v.Value.(*Node).Key)
 	}
 	fmt.Printf("====================\n")
 }
 
-func (this *LFUCache) evict() {
-	defer this.debug("EVICT")
+func (c *LFUCache) evict() {
+	defer c.debug("EVICT")
 
-	if this.Length == 0 {
+	if c.Length == 0 {
 		return
 	}
-	v := this.Dll.Back()
+	v := c.Dll.Back()
 	cnt := v.Value.(*Node).Counter
-	if this.Latest[cnt] == v {
-		delete(this.Latest, cnt)
+	if c.Latest[cnt] == v {
+		delete(c.Latest, cnt)
 	}
-	delete(this.HashMap, v.Value.(*Node).Key)
-	this.Dll.Remove(v)
-	this.Length--
+	delete(c.HashMap, v.Value.(*Node).Key)
+	c.Dll.Remove(v)
+	c.Length--
 }
 
-func (this *LFUCache) Inc(el *list.Element) {
+func (c *LFUCache) Inc(el *list.Element) *list.Element {
 	cnt := el.Value.(*Node).Counter
 	var latestRightAfter *list.Element
-	if this.Latest[cnt] == el {
+	if c.Latest[cnt] == el {
 		latestRightAfter = el.Next()
 		if latestRightAfter != nil {
 			if latestRightAfter.Value.(*Node).Counter != cnt {
-				delete(this.Latest, cnt)
+				delete(c.Latest, cnt)
 			} else {
-				this.Latest[cnt] = latestRightAfter
+				c.Latest[cnt] = latestRightAfter
 			}
 		} else {
-			delete(this.Latest, cnt)
+			delete(c.Latest, cnt)
 			latestRightAfter = nil
 		}
 	} else {
-		latestRightAfter = this.Latest[cnt]
+		latestRightAfter = c.Latest[cnt]
 	}
 
 	cnt++
 	el.Value.(*Node).Counter = cnt
 
-	this.Dll.Remove(el)
+	c.Dll.Remove(el)
 	var newEl *list.Element
-	if v, exists := this.Latest[cnt]; exists {
-		newEl = this.Dll.InsertBefore(el.Value, v)
+	if v, exists := c.Latest[cnt]; exists {
+		newEl = c.Dll.InsertBefore(el.Value, v)
 	} else {
 		if latestRightAfter == nil {
-			newEl = this.Dll.PushBack(el.Value)
+			newEl = c.Dll.PushBack(el.Value)
 		} else {
-			newEl = this.Dll.InsertBefore(el.Value, latestRightAfter)
+			newEl = c.Dll.InsertBefore(el.Value, latestRightAfter)
 		}
 	}
-	this.Latest[cnt] = newEl
-	this.HashMap[newEl.Value.(*Node).Key] = newEl
+	c.Latest[cnt] = newEl
+	c.HashMap[newEl.Value.(*Node).Key] = newEl
+
+	return newEl
 }
 
 func NewNode(k, v int) *Node {
@@ -111,38 +113,41 @@ func Constructor(capacity int) LFUCache {
 	}
 }
 
-func (this *LFUCache) Get(key int) int {
-	defer this.debug("GET")
+func (c *LFUCache) Get(key int) int {
+	defer c.debug("GET")
 
-	v, exists := this.HashMap[key]
+	v, exists := c.HashMap[key]
 	if !exists {
 		return -1
 	}
-	this.Inc(v)
-	return v.Value.(*Node).Value
+	newEl := c.Inc(v)
+	return newEl.Value.(*Node).Value
 }
 
-func (this *LFUCache) Put(key int, value int) {
-	defer this.debug("PUT")
+func (c *LFUCache) Put(key int, value int) {
+	defer c.debug("PUT")
 
-	v, exists := this.HashMap[key]
+	if c.Capacity == 0 {
+		return
+	}
+	v, exists := c.HashMap[key]
 	if !exists {
-		if this.Length == this.Capacity {
-			this.evict()
+		if c.Length == c.Capacity {
+			c.evict()
 		}
-		this.Length++
+		c.Length++
 		newNode := NewNode(key, value)
 		var newEl *list.Element
-		if mark, exists := this.Latest[1]; exists {
-			newEl = this.Dll.InsertBefore(newNode, mark)
+		if mark, exists := c.Latest[1]; exists {
+			newEl = c.Dll.InsertBefore(newNode, mark)
 		} else {
-			newEl = this.Dll.PushBack(newNode)
+			newEl = c.Dll.PushBack(newNode)
 		}
-		this.HashMap[key] = newEl
-		this.Latest[1] = newEl
+		c.HashMap[key] = newEl
+		c.Latest[1] = newEl
 	} else {
-		this.Inc(v)
-		v.Value.(*Node).Value = value
+		newEl := c.Inc(v)
+		newEl.Value.(*Node).Value = value
 	}
 }
 
