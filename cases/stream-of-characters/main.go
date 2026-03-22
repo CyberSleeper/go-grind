@@ -25,8 +25,8 @@ func (t *Trie) Insert(s string) {
 }
 
 type StreamChecker struct {
-	sTrie  *Trie
-	ptrSet map[*Trie]struct{}
+	sTrie   *Trie
+	activeNodes []*Trie
 }
 
 func Constructor(words []string) StreamChecker {
@@ -35,31 +35,31 @@ func Constructor(words []string) StreamChecker {
 		t.Insert(v)
 	}
 	return StreamChecker{
-		sTrie:  t,
-		ptrSet: make(map[*Trie]struct{}),
+		sTrie:   t,
+		activeNodes: make([]*Trie, 0),
 	}
 }
 
-func (this *StreamChecker) Query(letter byte) bool {
+func (c *StreamChecker) Query(letter byte) bool {
 	letter = byte(letter - 'a')
 	isEnd := false
 
-	newPtrSet := make(map[*Trie]struct{})
+	nextNodes := make([]*Trie, 0, len(c.activeNodes)+2)
 
 	//set starting ptr (empty string)
-	this.ptrSet[this.sTrie] = struct{}{}
+	c.activeNodes = append(c.activeNodes, c.sTrie)
 
-	for k := range this.ptrSet {
+	for _, k := range c.activeNodes {
 		k = k.Next[letter]
 		if k != nil {
-			newPtrSet[k] = struct{}{}
+			nextNodes = append(nextNodes, k)
 			if !isEnd && k.IsEnd {
 				isEnd = true
 			}
 		}
 	}
 
-	this.ptrSet = newPtrSet
+	c.activeNodes = nextNodes
 
 	return isEnd
 }
