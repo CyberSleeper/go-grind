@@ -1,8 +1,10 @@
 package main
 
 import (
-	"fmt"
-	"strconv"
+	"errors"
+	"math/rand"
+	"sync"
+	"time"
 )
 
 // Note: Golang Chan already has builtin lock.
@@ -16,7 +18,9 @@ type Producer struct {
 
 type Consumer struct {
 	Stream           *DataStream
+	DeadLetter       *DataStream
 	processedDataCnt int
+	MaxRetries       int
 }
 
 type DataStream struct {
@@ -28,15 +32,18 @@ type Orchestrator struct {
 	Producers   []*Producer
 	Consumers   []*Consumer
 	Stream      *DataStream
+	DeadLetter  *DataStream
 	Capacity    int
 	ProducerCnt int
 	ConsumerCnt int
+	MaxRetries  int
 }
 
 type DataEntry struct {
 	value      string
 	producerId int
 	consumerId int
+	retryCount int
 }
 
 func (p *Producer) Enqueue(x DataEntry) {
@@ -51,6 +58,47 @@ func (c *Consumer) Dequeue() (DataEntry, bool) {
 	}
 
 	return val, ok
+}
+
+func (c *Consumer) Consume(wg *sync.WaitGroup) bool {
+	val, ok := c.Dequeue()
+	if !ok {
+		return false
+	}
+	if err := ProcessItem(val.value); err != nil {
+		val.retryCount++
+		if val.retryCount > c.MaxRetries {
+			c.DeadLetter.Stream <- val
+			wg.Done()
+		} else {
+			go func() {
+				c.Stream.Stream <- val
+			}()
+		}
+	} else {
+		wg.Done()
+	}
+	return true
+}
+
+func (c *Consumer) Start(wg *sync.WaitGroup) {
+	for {
+		c.Consume(wg)
+	}
+}
+
+// ProcessItem simulates a real-world task that takes time and can fail.
+func ProcessItem(value string) error {
+	// Simulate work taking between 10ms - 50ms
+	time.Sleep(time.Duration(rand.Intn(40)+10) * time.Millisecond)
+	chance := rand.Intn(100) // 0 to 99
+	if chance < 60 {
+		return nil // 60% chance: Immediate Success!
+	} else if chance < 90 {
+		return errors.New("temporary network failure") // 30% chance: Fails, but might work if retried
+	} else {
+		return errors.New("fatal data corruption") // 10% chance: Hard fail. Could theoretically send straight to DLQ!
+	}
 }
 
 func (d *DataStream) Len() int {
@@ -74,14 +122,17 @@ func NewProducer(d *DataStream) *Producer {
 	}
 }
 
-func NewConsumer(d *DataStream) *Consumer {
+func NewConsumer(d, deadLetter *DataStream, maxRetries int) *Consumer {
 	return &Consumer{
-		Stream: d,
+		Stream:     d,
+		DeadLetter: deadLetter,
+		MaxRetries: maxRetries,
 	}
 }
 
-func NewOrchestrator(cap, producerCnt, consumerCnt int) *Orchestrator {
+func NewOrchestrator(cap, deadLetterCap, producerCnt, consumerCnt, maxRetries int) *Orchestrator {
 	stream := NewDataStream(cap)
+	deadLetter := NewDataStream(deadLetterCap)
 	producers := make([]*Producer, producerCnt)
 	consumers := make([]*Consumer, consumerCnt)
 
@@ -89,7 +140,7 @@ func NewOrchestrator(cap, producerCnt, consumerCnt int) *Orchestrator {
 		producers[i] = NewProducer(stream)
 	}
 	for i := range consumerCnt {
-		consumers[i] = NewConsumer(stream)
+		consumers[i] = NewConsumer(stream, deadLetter, maxRetries)
 	}
 
 	return &Orchestrator{
@@ -98,83 +149,8 @@ func NewOrchestrator(cap, producerCnt, consumerCnt int) *Orchestrator {
 		Consumers:   consumers,
 		ProducerCnt: producerCnt,
 		ConsumerCnt: consumerCnt,
-	}
-}
-
-func main() {
-	orc := NewOrchestrator(5, 5, 5)
-	var input chan DataEntry
-	var output chan DataEntry
-	var terminate chan int
-
-	input = make(chan DataEntry, 10)
-	output = make(chan DataEntry, 10)
-	terminate = make(chan int, 1)
-
-	for i := range orc.ProducerCnt {
-		go func() {
-			for {
-				data := <-input
-				data.producerId = i
-				orc.Producers[i].Enqueue(data)
-			}
-		}()
-	}
-
-	for i := range orc.ConsumerCnt {
-		go func() {
-			for {
-				val, ok := orc.Consumers[i].Dequeue()
-				if ok {
-					val.consumerId = i
-					output <- val
-				} else {
-					break
-				}
-			}
-		}()
-	}
-
-	for i := range 10000 {
-		go func() {
-			curData := DataEntry{
-				value:      strconv.Itoa(i),
-				producerId: -1,
-				consumerId: -1,
-			}
-
-			input <- curData
-		}()
-	}
-
-	go func() {
-	Mainloop:
-		for {
-			select {
-			case <-output:
-				continue
-			case <-terminate:
-				break Mainloop
-			}
-		}
-	}()
-
-	for {
-		var in string
-		fmt.Print("Enter your message: ")
-		fmt.Scanln(&in)
-		if in == "exit" {
-			for i, v := range orc.Producers {
-				fmt.Println("Producer", i, v.processedDataCnt)
-			}
-			for i, v := range orc.Consumers {
-				fmt.Println("Consumer", i, v.processedDataCnt)
-			}
-			break
-		}
-		d := DataEntry{
-			value: in,
-		}
-		input <- d
+		MaxRetries:  maxRetries,
+		DeadLetter:  deadLetter,
+		Capacity:    cap,
 	}
 }
